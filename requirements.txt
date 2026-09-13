@@ -1,0 +1,10 @@
+torch
+transformers
+sentence-transformers
+openai
+aiohttp
+requests
+python-dotenv
+tqdm
+numpy
+faiss-cpu

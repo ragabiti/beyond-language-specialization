@@ -1,0 +1,24 @@
+# ── Regenerable / heavy artifacts — NEVER commit ────────────────────────────
+data/gen_res/
+**/interim_*.json
+**/*details*.json
+**/*.zip
+**/*.pkl
+
+# ── Large data -> GitHub Release / original sources, not git ────────────────
+data/dataset/
+data/ragass/ragass_samples_*.json
+data/ragass/results_*/
+data/llm_as_a_judge/
+
+# ── Secrets ─────────────────────────────────────────────────────────────────
+.env
+
+# ── Cache / OS ──────────────────────────────────────────────────────────────
+**/__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.ipynb_checkpoints/
+.venv/
+venv/

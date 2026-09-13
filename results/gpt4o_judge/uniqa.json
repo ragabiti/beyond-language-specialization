@@ -1,0 +1,92 @@
+[
+  {
+    "model_id": "Qwen/Qwen3.5-9B",
+    "dataset": "uniqa_it",
+    "accuracy": 0.7381,
+    "faithfulness": 0.4807,
+    "answer_relevance": 0.7699,
+    "context_relevance": 0.0399,
+    "n": 1573
+  },
+  {
+    "model_id": "ibm-granite/granite-4.1-8b",
+    "dataset": "uniqa_it",
+    "accuracy": 0.7038,
+    "faithfulness": 0.4244,
+    "answer_relevance": 0.7625,
+    "context_relevance": 0.04,
+    "n": 1573
+  },
+  {
+    "model_id": "google/gemma-4-E2B-it",
+    "dataset": "uniqa_it",
+    "accuracy": 0.6783,
+    "faithfulness": 0.4975,
+    "answer_relevance": 0.6878,
+    "context_relevance": 0.0399,
+    "n": 1573
+  },
+  {
+    "model_id": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+    "dataset": "uniqa_it",
+    "accuracy": 0.6739,
+    "faithfulness": 0.417,
+    "answer_relevance": 0.7897,
+    "context_relevance": 0.0396,
+    "n": 1573
+  },
+  {
+    "model_id": "velvet-14b",
+    "dataset": "uniqa_it",
+    "accuracy": 0.6427,
+    "faithfulness": 0.3457,
+    "answer_relevance": 0.7863,
+    "context_relevance": 0.0396,
+    "n": 1573
+  },
+  {
+    "model_id": "mistralai/Ministral-8B-Instruct-2410",
+    "dataset": "uniqa_it",
+    "accuracy": 0.6275,
+    "faithfulness": 0.4219,
+    "answer_relevance": 0.6689,
+    "context_relevance": 0.0396,
+    "n": 1573
+  },
+  {
+    "model_id": "ibm-granite/granite-4.1-3B",
+    "dataset": "uniqa_it",
+    "accuracy": 0.5734,
+    "faithfulness": 0.4163,
+    "answer_relevance": 0.6728,
+    "context_relevance": 0.0398,
+    "n": 1573
+  },
+  {
+    "model_id": "velvet-2b-1.5-03-23918",
+    "dataset": "uniqa_it",
+    "accuracy": 0.3967,
+    "faithfulness": 0.3282,
+    "answer_relevance": 0.7756,
+    "context_relevance": 0.0401,
+    "n": 1573
+  },
+  {
+    "model_id": "VillanovaAI/Villanova-2B-2603",
+    "dataset": "uniqa_it",
+    "accuracy": 0.3083,
+    "faithfulness": 0.3469,
+    "answer_relevance": 0.6493,
+    "context_relevance": 0.0398,
+    "n": 1573
+  },
+  {
+    "model_id": "Fastweb/FastwebMIIA-7B",
+    "dataset": "uniqa_it",
+    "accuracy": 0.2746,
+    "faithfulness": 0.2695,
+    "answer_relevance": 0.7248,
+    "context_relevance": 0.0397,
+    "n": 1573
+  }
+]

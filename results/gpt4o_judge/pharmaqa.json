@@ -1,0 +1,101 @@
+[
+  {
+    "model_id": "ibm-granite/granite-4.1-8b",
+    "dataset": "pharmaqa_it",
+    "accuracy": 0.6209,
+    "faithfulness": 0.6663,
+    "answer_relevance": 0.5799,
+    "context_relevance": 0.0324,
+    "n": 852
+  },
+  {
+    "model_id": "Qwen/Qwen3.5-9B",
+    "dataset": "pharmaqa_it",
+    "accuracy": 0.6162,
+    "faithfulness": 0.6165,
+    "answer_relevance": 0.5054,
+    "context_relevance": 0.0325,
+    "n": 852
+  },
+  {
+    "model_id": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+    "dataset": "pharmaqa_it",
+    "accuracy": 0.6009,
+    "faithfulness": 0.6382,
+    "answer_relevance": 0.6493,
+    "context_relevance": 0.0329,
+    "n": 852
+  },
+  {
+    "model_id": "google/gemma-4-E2B-it",
+    "dataset": "pharmaqa_it",
+    "accuracy": 0.581,
+    "faithfulness": 0.6752,
+    "answer_relevance": 0.495,
+    "context_relevance": 0.0323,
+    "n": 852
+  },
+  {
+    "model_id": "velvet-14b",
+    "dataset": "pharmaqa_it",
+    "accuracy": 0.5634,
+    "faithfulness": 0.6111,
+    "answer_relevance": 0.5879,
+    "context_relevance": 0.0331,
+    "n": 852
+  },
+  {
+    "model_id": "ibm-granite/granite-4.1-3B",
+    "dataset": "pharmaqa_it",
+    "accuracy": 0.4965,
+    "faithfulness": 0.6482,
+    "answer_relevance": 0.4593,
+    "context_relevance": 0.0323,
+    "n": 852
+  },
+  {
+    "model_id": "velvet-2b-1.5-03-23918",
+    "dataset": "pharmaqa_it",
+    "accuracy": 0.4131,
+    "faithfulness": 0.5159,
+    "answer_relevance": 0.5639,
+    "context_relevance": 0.033,
+    "n": 852
+  },
+  {
+    "model_id": "VillanovaAI/Villanova-2B-2603",
+    "dataset": "pharmaqa_it",
+    "accuracy": 0.3815,
+    "faithfulness": 0.5211,
+    "answer_relevance": 0.5459,
+    "context_relevance": 0.033,
+    "n": 852
+  },
+  {
+    "model_id": "Fastweb/FastwebMIIA-7B",
+    "dataset": "pharmaqa_it",
+    "accuracy": 0.3639,
+    "faithfulness": 0.5059,
+    "answer_relevance": 0.7371,
+    "context_relevance": 0.0334,
+    "n": 852
+  },
+  {
+    "model_id": "mistralai/Ministral-8B-Instruct-2410",
+    "dataset": "pharmaqa_it",
+    "accuracy": 0.1995,
+    "faithfulness": 0.2949,
+    "answer_relevance": 0.5314,
+    "context_relevance": 0.0329,
+    "n": 852
+  },
+  {
+    "model_id": "sapienzanlp/Minerva-7B-instruct-v1.0",
+    "dataset": "pharmaqa_it",
+    "accuracy": 0.0306,
+    "faithfulness": 0.3354,
+    "answer_relevance": 0.5675,
+    "context_relevance": 0.0519,
+    "n": 851
+  }
+]
