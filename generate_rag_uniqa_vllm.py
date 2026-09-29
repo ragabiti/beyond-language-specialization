@@ -146,15 +146,13 @@ def build_prompt(question: str, passages: list, dataset_name: str, llm_id: str =
                   il testo di ciascun passaggio recuperato.
         dataset_name: nome del dataset ('uniqa_it' o 'uniqa_en'),
                       usato per selezionare l'istruzione di sistema.
-        llm_id: identificativo del modello, usato per determinare
-                se applicare il troncamento dei passaggi (default: "").
+        llm_id: identificativo del modello. Se contiene 'velvet',
+                l'istruzione di sistema viene omessa dal prompt
+                (il wrapper llm_velvet_uniqa la inietta gia' come system message).
 
     Returns:
         Stringa con il prompt completo pronto per l'inferenza.
     """
-    # Selezione dell'istruzione in base alla lingua del dataset
-    instruction = TASK_INSTRUCTIONS.get(dataset_name, TASK_INSTRUCTION_IT)
-
     # Verifica se il modello richiede troncamento dei passaggi
     llm_lower = llm_id.lower()
     needs_truncation = any(m in llm_lower for m in LIMITED_CONTEXT_MODELS)
@@ -164,6 +162,13 @@ def build_prompt(question: str, passages: list, dataset_name: str, llm_id: str =
         f"Document [{i+1}](Title: passage) {_truncate_passage(p.get('text', '')) if needs_truncation else p.get('text', '')}"
         for i, p in enumerate(passages)
     )
+
+    # Per Velvet, l'istruzione e' gia' nel system message del wrapper: evita duplicazione
+    if "velvet" in llm_lower:
+        return f"Documents:\n{docs_str}\nQuestion: {question}\nAnswer:"
+
+    # Per vLLM, l'istruzione va nel prompt (nessun system message nel wrapper)
+    instruction = TASK_INSTRUCTIONS.get(dataset_name, TASK_INSTRUCTION_IT)
     return f"{instruction}\nDocuments:\n{docs_str}\nQuestion: {question}\nAnswer:"
 
 
