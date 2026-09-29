@@ -367,9 +367,9 @@ def run_dataset(llm, dataset_name: str, dataset_path: str, args, llm_folder: str
         # Iterazione su ogni esempio del dataset
         for idx, example in enumerate(tqdm(data, desc=f"{dataset_name} k={k}")):
             # Selezione dei top-k passaggi recuperati per questo esempio
-            passages = example["passages"][:k]
+            passages = example.get("passages", [])[:k]
             # Costruzione del prompt dataset-specific con istruzione, documenti e domanda
-            prompt = build_prompt(example["question"], passages, dataset_name, args.llm_id)
+            prompt = build_prompt(example.get("question", ""), passages, dataset_name, args.llm_id)
 
             # Chiamata al modello Velvet per generare la risposta
             output = llm.generate(prompt, max_new_tokens=args.max_new_tokens)
