@@ -39,6 +39,7 @@ import os
 import re
 import sys
 import json
+import glob
 import pickle
 import argparse
 from tqdm import tqdm
@@ -160,7 +161,7 @@ def build_prompt(question: str, passages: list, dataset_name: str, llm_id: str =
 
     # Formattazione dei documenti con eventuale troncamento
     docs_str = "\n".join(
-        f"Document [{i+1}](Title: passage) {_truncate_passage(p['text']) if needs_truncation else p['text']}"
+        f"Document [{i+1}](Title: passage) {_truncate_passage(p.get('text', '')) if needs_truncation else p.get('text', '')}"
         for i, p in enumerate(passages)
     )
     return f"{instruction}\nDocuments:\n{docs_str}\nQuestion: {question}\nAnswer:"
@@ -336,15 +337,36 @@ def run_dataset(llm, dataset_name: str, dataset_path: str, args, llm_folder: str
             print(f"  Già completato — Accuracy: {summary['accuracy']:.4f}  (usa --overwrite per rigirare)")
             continue
 
+        # --- Resume: carica risultati parziali se presenti ---
+        checkpoint_path = os.path.join(save_dir, f"results_top{k}_checkpoint.pkl")
         results = []
-        correct = 0
+        done_ids = set()
+
+        # Cerca prima il checkpoint, poi eventuali pkl finali orfani
+        resume_sources = [checkpoint_path] + sorted(
+            glob.glob(os.path.join(save_dir, f"results_top{k}_info_*.pkl"))
+        )
+        for src in resume_sources:
+            if os.path.exists(src):
+                with open(src, 'rb') as f:
+                    results = pickle.load(f)
+                done_ids = {r['example_id'] for r in results}
+                print(f"  Resume: {len(results)} record gia' completati")
+                break
+
+        correct = sum(1 for r in results if r.get('is_correct', False))
+        new_count = 0
 
         # Iterazione su ogni esempio del dataset
         for idx, example in enumerate(tqdm(data, desc=f"{dataset_name} k={k}")):
+            eid = example.get('example_id', idx)
+            if eid in done_ids:
+                continue
+
             # Selezione dei top-k passaggi recuperati per questo esempio
-            passages = example['passages'][:k]
+            passages = example.get('passages', [])[:k]
             # Costruzione del prompt con istruzione, documenti e domanda
-            prompt   = build_prompt(example['question'], passages, dataset_name, args.llm_id)
+            prompt = build_prompt(example.get('question', ''), passages, dataset_name, args.llm_id)
 
             # Chiamata al modello per generare la risposta
             output = llm.generate(prompt, max_new_tokens=args.max_new_tokens)
@@ -352,36 +374,52 @@ def run_dataset(llm, dataset_name: str, dataset_path: str, args, llm_folder: str
             if isinstance(output, list):
                 output = output[0]
 
+            # Salvataggio output grezzo prima della pulizia (per eventuale ri-cleaning offline)
+            raw_output = output if isinstance(output, str) else str(output)
             # Pulizia robusta dell'output grezzo del modello
             generated = clean_generated(output)
 
             # Valutazione della correttezza tramite string match
-            is_correct = string_match(generated, example['answers'])
+            is_correct = string_match(generated, example.get('answers', []))
             if is_correct:
                 correct += 1
 
             # Accumulo dei risultati per l'esempio corrente
             results.append({
-                'example_id': example['example_id'],
-                'question':   example['question'],
-                'answers':    example['answers'],
+                'example_id': eid,
+                'question':   example.get('question', ''),
+                'answers':    example.get('answers', []),
+                'raw_output': raw_output,
                 'generated':  generated,
                 'is_correct': is_correct,
                 'k':          k,
                 'dataset':    dataset_name,
-                'n_relevant': sum(1 for p in passages if p['is_relevant']),
+                'n_relevant': sum(1 for p in passages if p.get('is_relevant', False)),
             })
 
-            # Salvataggio progressivo su disco ogni save_every esempi o alla fine
-            if (idx + 1) % args.save_every == 0 or (idx + 1) == len(data):
-                acc = correct / (idx + 1)
-                print(f"  Salvato a {idx+1} — Accuracy (indicativa): {acc:.4f}")
-                fname = os.path.join(save_dir, f"results_top{k}_info_{idx+1}.pkl")
-                with open(fname, 'wb') as f:
+            new_count += 1
+
+            # Checkpoint periodico: sovrascrive un singolo file
+            if new_count % args.save_every == 0:
+                with open(checkpoint_path, 'wb') as f:
                     pickle.dump(results, f)
+                acc = correct / len(results) if results else 0.0
+                print(f"  Checkpoint: {len(results)}/{len(data)} — Accuracy: {acc:.4f}")
+
+        # --- Salvataggio finale ---
+        final_pkl = os.path.join(save_dir, f"results_top{k}_info_{len(results)}.pkl")
+        with open(final_pkl, 'wb') as f:
+            pickle.dump(results, f)
+
+        # Pulizia: rimuove checkpoint e vecchi pkl ridondanti
+        if os.path.exists(checkpoint_path):
+            os.remove(checkpoint_path)
+        for old in glob.glob(os.path.join(save_dir, f"results_top{k}_info_*.pkl")):
+            if old != final_pkl:
+                os.remove(old)
 
         # Calcolo e stampa dell'accuracy finale per questo valore di k
-        final_acc = correct / len(data)
+        final_acc = correct / len(data) if data else 0.0
         print(f"\n{dataset_name} k={k} — Accuracy indicativa: {final_acc:.4f}")
         print(f"  (metrica principale: RAGAS con LLM judge)")
 
