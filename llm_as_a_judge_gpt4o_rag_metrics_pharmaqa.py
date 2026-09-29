@@ -1,32 +1,33 @@
 """
 llm_as_a_judge_gpt4o_rag_metrics_pharmaqa.py
 
-LLM-as-a-judge evaluation for Italian RAG samples (pharmaqa_it):
-- faithfulness
-- context relevance
-- answer relevance with n synthetic questions + local embeddings
+Valutazione LLM-as-a-Judge delle metriche RAG complete su PharmaQA IT
+tramite GPT-4o-mini (o altro modello OpenAI-compatible).
 
-Answer relevance follows the RAGAS-style pipeline:
-    generated answer -> n synthetic Italian questions by LLM
-    original question + synthetic questions -> local embeddings
-    answer_relevance = mean cosine similarity(original_question, synthetic_questions)
+Metriche calcolate:
+    - Faithfulness: estrazione statement + verifica contro il contesto
+    - Context Relevance: frasi rilevanti estratte / frasi totali
+    - Answer Relevance: domande sintetiche + cosine similarity via embedding
 
-Input expected: JSON list with fields:
-    example_id, dataset, model_id, question, generated, context
-Optional fields are copied when present:
-    answers, is_correct_string
+Pipeline AR (stile RAGAS):
+    risposta generata -> N domande sintetiche in italiano (LLM)
+    embedding(domanda originale) vs embedding(domande sintetiche)
+    AR = media delle cosine similarity
 
-Outputs:
+Input atteso: lista JSON con campi example_id, dataset, model_id,
+    question, generated, context. Campi opzionali: answers, is_correct_string.
+
+Output:
     <output-dir>/rag_metrics_details.json
     <output-dir>/rag_metrics_summary_by_model_dataset.json
 
-Example:
-    python llm_as_a_judge_gpt4o_rag_metrics_pharmaqa.py \
-      --input-file data/llm_as_a_judge/pharmaqa/ragass_samples_pharmaqa.json \
-      --output-dir data/llm_as_a_judge/pharmaqa_rag_metrics \
-      --judge-model gpt-4o-mini \
-      --concurrency 16 \
-      --datasets pharmaqa_it
+Dipendenze: openai (async), sentence-transformers, numpy, dotenv.
+
+Uso:
+    python llm_as_a_judge_gpt4o_rag_metrics_pharmaqa.py \\
+      --input-file data/llm_as_a_judge/pharmaqa/ragass_samples_pharmaqa.json \\
+      --output-dir data/llm_as_a_judge/pharmaqa_rag_metrics \\
+      --judge-model gpt-4o-mini --concurrency 16 --datasets pharmaqa_it
 """
 
 import argparse
@@ -48,32 +49,36 @@ try:
 except Exception:
     SentenceTransformer = None
 
+# Caricamento variabili d'ambiente per l'API
 load_dotenv(dotenv_path=".env", override=True)
 
 API_URL = os.getenv("LLM_API_URL", "").strip()
 API_TOKEN = os.getenv("LLM_API_TOKEN", "").strip()
 
-JUDGE_MODEL = "gpt-4o-mini"
-CONCURRENCY = 4
-N_QUESTIONS = 5
-CTX_MAX_CHARS = 25000
-EMBEDDING_MODEL = "BAAI/bge-m3"
+# ─── Configurazione globale ──────────────────────────────────────────────────
+JUDGE_MODEL = "gpt-4o-mini"          # Modello judge per le chiamate LLM
+CONCURRENCY = 4                       # Richieste concorrenti verso l'API
+N_QUESTIONS = 5                       # Domande sintetiche per Answer Relevance
+CTX_MAX_CHARS = 25000                 # Troncamento massimo del contesto
+EMBEDDING_MODEL = "BAAI/bge-m3"       # Modello embedding locale
 
-MAX_TOKENS_FAITH = 300
-MAX_TOKENS_AR_QGEN = 80
-MAX_TOKENS_CR = 400
+MAX_TOKENS_FAITH = 300                # Max token per le chiamate Faithfulness
+MAX_TOKENS_AR_QGEN = 80              # Max token per generazione domande sintetiche
+MAX_TOKENS_CR = 400                   # Max token per Context Relevance
 
 DEFAULT_INPUT = Path("data/llm_as_a_judge/pharmaqa/ragass_samples_pharmaqa.json")
 DEFAULT_OUTPUT_DIR = Path("data/llm_as_a_judge/pharmaqa_rag_metrics")
 DATASETS = {"pharmaqa_it"}
 
-sem = None
-embedder = None
-embed_lock = None
-question_embedding_cache = {}
+# Variabili globali inizializzate in main()
+sem = None                            # Semaforo asyncio per il rate limiting
+embedder = None                       # Modello SentenceTransformer
+embed_lock = None                     # Lock per serializzare gli embedding
+question_embedding_cache = {}         # Cache embedding delle domande originali
 
 
 def _normalize_openai_base_url(url: str) -> str:
+    """Normalizza l'URL base dell'API aggiungendo /v1 se necessario."""
     if not url:
         raise RuntimeError("LLM_API_URL non impostata nel file .env o nell'ambiente.")
     url = url.rstrip("/")
@@ -87,6 +92,7 @@ def _normalize_openai_base_url(url: str) -> str:
 
 
 def _clean_api_key(token: str) -> str:
+    """Rimuove il prefisso 'Bearer ' se presente nel token API."""
     if not token:
         raise RuntimeError("LLM_API_TOKEN non impostata nel file .env o nell'ambiente.")
     token = token.strip()
@@ -96,6 +102,7 @@ def _clean_api_key(token: str) -> str:
 
 
 def make_client() -> AsyncOpenAI:
+    """Crea un client AsyncOpenAI con URL e token dal file .env."""
     return AsyncOpenAI(
         api_key=_clean_api_key(API_TOKEN),
         base_url=_normalize_openai_base_url(API_URL),
@@ -109,6 +116,7 @@ async def llm_call(
     max_tokens: int,
     temperature: float = 0.0,
 ) -> str:
+    """Chiamata singola al modello judge. Rimuove eventuali tag </think>."""
     resp = await client.chat.completions.create(
         model=JUDGE_MODEL,
         messages=[
@@ -125,13 +133,13 @@ async def llm_call(
 
 
 def count_sentences(text: str) -> int:
+    """Conta le frasi nel testo (split su .!?) — minimo 1."""
     sentences = re.split(r"[.!?]+", text or "")
     return max(1, len([s for s in sentences if s.strip()]))
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Faithfulness
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── Faithfulness ─────────────────────────────────────────────────────────────
+# Prompt di sistema per estrazione e verifica degli statement fattuali
 _SYS_FAITH_EXTRACT = (
     "Estrai affermazioni fattuali atomiche da risposte in italiano. "
     "Elenca ogni affermazione su una nuova riga iniziando con 'statement: '."
@@ -146,6 +154,7 @@ _SYS_FAITH_VERIFY = (
 
 
 def parse_statements(text: str) -> list[str]:
+    """Estrae le affermazioni dall'output LLM (formato 'statement:' o elenco numerato)."""
     statements = []
     for line in text.strip().split("\n"):
         line = line.strip()
@@ -167,6 +176,7 @@ def parse_statements(text: str) -> list[str]:
 
 
 def parse_verdicts(text: str, n: int) -> list[bool]:
+    """Estrae n verdetti Yes/No dall'output LLM. Fallback: conta occorrenze yes/no."""
     verdicts = []
     for line in text.strip().split("\n"):
         line = line.strip().lower()
@@ -186,6 +196,7 @@ def parse_verdicts(text: str, n: int) -> list[bool]:
 
 
 async def compute_faithfulness(client: AsyncOpenAI, question: str, generated: str, context: str) -> dict:
+    """Calcola faithfulness: estrae statement dalla risposta e li verifica contro il contesto."""
     generated = str(generated or "")
     context = str(context or "")
 
@@ -242,9 +253,8 @@ async def compute_faithfulness(client: AsyncOpenAI, question: str, generated: st
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Context relevance
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── Context Relevance ────────────────────────────────────────────────────────
+# Prompt di sistema per estrazione delle frasi rilevanti dal contesto
 _SYS_CTXREL = (
     "Estrai dal contesto le frasi rilevanti per rispondere alla domanda. "
     "Output SOLO con frasi copiate testualmente, oppure 'Insufficient Information' se nessuna frase è rilevante."
@@ -252,6 +262,7 @@ _SYS_CTXREL = (
 
 
 async def compute_context_relevance(client: AsyncOpenAI, question: str, context: str) -> dict:
+    """Calcola context relevance: frasi rilevanti estratte / frasi totali nel contesto."""
     context = str(context or "")
     if not context.strip():
         return {"context_relevance": 0.0, "n_extracted": 0, "n_total_sentences": 0, "_cr_raw": ""}
@@ -278,9 +289,8 @@ async def compute_context_relevance(client: AsyncOpenAI, question: str, context:
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Answer relevance: n synthetic questions + local embedding cosine similarity
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── Answer Relevance ─────────────────────────────────────────────────────────
+# Genera N domande sintetiche, poi calcola cosine similarity con embedding locali
 _SYS_QGEN = (
     "Genera una domanda in italiano a cui la risposta data potrebbe rispondere. "
     "Output SOLO con la domanda, nient’altro."
@@ -288,6 +298,7 @@ _SYS_QGEN = (
 
 
 async def generate_one_question(client: AsyncOpenAI, generated: str) -> str:
+    """Genera una domanda sintetica in italiano a partire dalla risposta generata."""
     gen_trunc = str(generated or "")[:800]
     user = (
         "Genera una domanda plausibile in italiano la cui risposta sarebbe il testo seguente. "
@@ -298,6 +309,7 @@ async def generate_one_question(client: AsyncOpenAI, generated: str) -> str:
 
 
 def _clean_synthetic_question(q: str) -> str:
+    """Pulisce una domanda sintetica: rimuove numerazione, apici, spazi."""
     q = (q or "").strip()
     q = re.sub(r"^[\d]+[.)]\s*", "", q).strip()
     q = q.strip('"').strip("'").strip()
@@ -305,6 +317,7 @@ def _clean_synthetic_question(q: str) -> str:
 
 
 async def embed_texts(texts: list[str]) -> np.ndarray:
+    """Calcola embedding di una lista di testi (serializzato tramite lock)."""
     global embedder, embed_lock
     async with embed_lock:
         return await asyncio.to_thread(
@@ -317,6 +330,7 @@ async def embed_texts(texts: list[str]) -> np.ndarray:
 
 
 async def get_question_embedding(question: str) -> np.ndarray:
+    """Restituisce l'embedding della domanda originale (con cache)."""
     key = question.strip()
     cached = question_embedding_cache.get(key)
     if cached is not None:
@@ -327,6 +341,7 @@ async def get_question_embedding(question: str) -> np.ndarray:
 
 
 async def compute_answer_relevance(client: AsyncOpenAI, question: str, generated: str) -> dict:
+    """Calcola AR: genera N domande sintetiche, poi media cosine similarity con la domanda originale."""
     generated = str(generated or "")
     if not generated.strip():
         return {
@@ -370,10 +385,12 @@ async def compute_answer_relevance(client: AsyncOpenAI, question: str, generated
 
 
 def record_key(rec: dict) -> tuple:
+    """Chiave univoca di un record: (dataset, model_id, example_id)."""
     return (rec.get("dataset"), rec.get("model_id"), rec.get("example_id"))
 
 
 def is_valid_result(rec: dict) -> bool:
+    """True se il record ha tutte le metriche calcolate e nessun errore."""
     if rec.get("error"):
         return False
     required = ["faithfulness", "context_relevance", "answer_relevance"]
@@ -381,6 +398,7 @@ def is_valid_result(rec: dict) -> bool:
 
 
 async def evaluate_record(client: AsyncOpenAI, rec: dict) -> dict:
+    """Valuta un singolo record: calcola faithfulness, CR e AR, restituisce il record arricchito."""
     async with sem:
         try:
             question = rec["question"]
@@ -414,6 +432,7 @@ async def evaluate_record(client: AsyncOpenAI, rec: dict) -> dict:
 
 
 def load_existing_details(details_path: Path, target_records: list) -> tuple[list, list]:
+    """Carica risultati precedenti per il resume. Ritorna (gia_fatti, da_fare)."""
     if not details_path.exists():
         return [], target_records
 
@@ -441,6 +460,7 @@ def load_existing_details(details_path: Path, target_records: list) -> tuple[lis
 
 
 def build_summary(details: list) -> list:
+    """Aggrega i dettagli per (model_id, dataset) e calcola le medie delle metriche."""
     grouped = defaultdict(lambda: {
         "n": 0,
         "n_errors": 0,
@@ -488,6 +508,7 @@ def build_summary(details: list) -> list:
 
 
 async def run(records: list, details_path: Path, existing_details: list) -> list:
+    """Esegue la valutazione asincrona di tutti i record con checkpoint periodico."""
     client = make_client()
 
     print(f"Judge:          {JUDGE_MODEL}")
@@ -521,9 +542,11 @@ async def run(records: list, details_path: Path, existing_details: list) -> list
 
 
 def main():
+    """Punto di ingresso: parsing args, caricamento modelli, valutazione, salvataggio."""
     global JUDGE_MODEL, CONCURRENCY, N_QUESTIONS, CTX_MAX_CHARS, EMBEDDING_MODEL
     global sem, embedder, embed_lock
 
+    # Parsing degli argomenti da riga di comando
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-file", type=str, default=str(DEFAULT_INPUT))
     parser.add_argument("--output-dir", type=str, default=str(DEFAULT_OUTPUT_DIR))
@@ -537,6 +560,7 @@ def main():
     parser.add_argument("--embedding-model", type=str, default=EMBEDDING_MODEL)
     args = parser.parse_args()
 
+    # Aggiornamento delle variabili globali dai parametri CLI
     JUDGE_MODEL = args.judge_model
     CONCURRENCY = args.concurrency
     N_QUESTIONS = args.n_questions
@@ -545,12 +569,14 @@ def main():
     sem = asyncio.Semaphore(CONCURRENCY)
     embed_lock = asyncio.Lock()
 
+    # Inizializzazione del modello di embedding locale
     if SentenceTransformer is None:
         raise RuntimeError("sentence-transformers non installato. Installa con: pip install sentence-transformers")
 
     print(f"Caricamento embedding model locale: {EMBEDDING_MODEL}")
     embedder = SentenceTransformer(EMBEDDING_MODEL)
 
+    # Configurazione percorsi di input/output
     input_path = Path(args.input_file)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -558,6 +584,7 @@ def main():
     details_path = output_dir / "rag_metrics_details.json"
     summary_path = output_dir / "rag_metrics_summary_by_model_dataset.json"
 
+    # Caricamento e filtraggio dei record di input
     records = json.loads(input_path.read_text(encoding="utf-8"))
 
     wanted_datasets = set(args.datasets) if args.datasets else set(r.get("dataset") for r in records)
@@ -574,9 +601,11 @@ def main():
     print(f"Dataset: {sorted(wanted_datasets)}")
     print(f"Totale record target: {len(records)}")
 
+    # Resume: separa record gia' completati da quelli da valutare
     existing, pending = load_existing_details(details_path, records)
     details = asyncio.run(run(pending, details_path, existing))
 
+    # Calcolo e salvataggio del summary aggregato per modello/dataset
     summary = build_summary(details)
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
