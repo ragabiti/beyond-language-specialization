@@ -40,6 +40,7 @@ import os
 import sys
 import re
 import json
+import glob
 import pickle
 import argparse
 from tqdm import tqdm
@@ -361,11 +362,32 @@ def run_dataset(llm, dataset_name: str, dataset_path: str, args, llm_folder: str
             )
             continue
 
+        # --- Resume: carica risultati parziali se presenti ---
+        checkpoint_path = os.path.join(save_dir, f"results_top{k}_checkpoint.pkl")
         results = []
-        correct = 0
+        done_ids = set()
+
+        # Cerca prima il checkpoint, poi eventuali pkl finali orfani
+        resume_sources = [checkpoint_path] + sorted(
+            glob.glob(os.path.join(save_dir, f"results_top{k}_info_*.pkl"))
+        )
+        for src in resume_sources:
+            if os.path.exists(src):
+                with open(src, "rb") as f:
+                    results = pickle.load(f)
+                done_ids = {r["example_id"] for r in results}
+                print(f"  Resume: {len(results)} record gia' completati")
+                break
+
+        correct = sum(1 for r in results if r.get("is_correct", False))
+        new_count = 0
 
         # Iterazione su ogni esempio del dataset
         for idx, example in enumerate(tqdm(data, desc=f"{dataset_name} k={k}")):
+            eid = example.get("example_id", idx)
+            if eid in done_ids:
+                continue
+
             # Selezione dei top-k passaggi recuperati per questo esempio
             passages = example.get("passages", [])[:k]
             # Costruzione del prompt dataset-specific con istruzione, documenti e domanda
@@ -387,7 +409,7 @@ def run_dataset(llm, dataset_name: str, dataset_path: str, args, llm_folder: str
 
             # Accumulo dei risultati per l'esempio corrente
             results.append({
-                "example_id": example.get("example_id", idx),
+                "example_id": eid,
                 "question": example.get("question", ""),
                 "answers": example.get("answers", []),
                 "generated": generated,
@@ -397,13 +419,26 @@ def run_dataset(llm, dataset_name: str, dataset_path: str, args, llm_folder: str
                 "n_relevant": _safe_n_relevant(passages),
             })
 
-            # Salvataggio progressivo su disco ogni save_every esempi o alla fine
-            if (idx + 1) % args.save_every == 0 or (idx + 1) == len(data):
-                acc = correct / (idx + 1)
-                print(f"  [{idx+1}/{len(data)}] Accuracy indicativa: {acc:.4f}")
-                fname = os.path.join(save_dir, f"results_top{k}_info_{idx+1}.pkl")
-                with open(fname, "wb") as f:
+            new_count += 1
+
+            # Checkpoint periodico: sovrascrive un singolo file
+            if new_count % args.save_every == 0:
+                with open(checkpoint_path, "wb") as f:
                     pickle.dump(results, f)
+                acc = correct / len(results) if results else 0.0
+                print(f"  Checkpoint: {len(results)}/{len(data)} — Accuracy: {acc:.4f}")
+
+        # --- Salvataggio finale ---
+        final_pkl = os.path.join(save_dir, f"results_top{k}_info_{len(results)}.pkl")
+        with open(final_pkl, "wb") as f:
+            pickle.dump(results, f)
+
+        # Pulizia: rimuove checkpoint e vecchi pkl ridondanti
+        if os.path.exists(checkpoint_path):
+            os.remove(checkpoint_path)
+        for old in glob.glob(os.path.join(save_dir, f"results_top{k}_info_*.pkl")):
+            if old != final_pkl:
+                os.remove(old)
 
         # Calcolo e stampa dell'accuracy finale per questo valore di k
         final_acc = correct / len(data) if data else 0.0
