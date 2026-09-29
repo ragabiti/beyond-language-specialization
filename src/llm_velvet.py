@@ -34,6 +34,7 @@ Esempio d'uso:
 
 import os
 import re
+import time
 import requests
 from typing import List, Optional
 from dotenv import load_dotenv
@@ -47,6 +48,12 @@ API_TOKEN = os.getenv("LLM_API_TOKEN")
 
 # Timeout in secondi per le richieste HTTP all'API
 TIMEOUT = 300
+
+# Rate limiting: 1000 richieste/ora -> minimo 3.6s tra le chiamate
+REQUEST_INTERVAL = 3.6
+# Retry su 429: numero massimo di tentativi e backoff iniziale
+MAX_RETRIES_429 = 5
+RETRY_BASE_DELAY = 5.0
 
 
 def _clean_bpe_artifacts(text: str) -> str:
@@ -129,6 +136,7 @@ class LLM:
         self.stop_list = stop_list or []
         self.model_max_length = model_max_length
         self.timeout = timeout
+        self._last_request_time = 0.0
 
         # Verifica che le credenziali API siano configurate
         if not API_URL:
@@ -178,6 +186,13 @@ class LLM:
 
         return results
 
+    def _wait_rate_limit(self):
+        """Attende il tempo necessario per rispettare il rate limit (1000 req/ora)."""
+        elapsed = time.time() - self._last_request_time
+        if elapsed < REQUEST_INTERVAL:
+            time.sleep(REQUEST_INTERVAL - elapsed)
+        self._last_request_time = time.time()
+
     def _call_api(self, prompt: str, max_new_tokens: int) -> str:
         """
         Effettua una singola chiamata all'API Velvet con tutti i parametri di sampling.
@@ -185,6 +200,7 @@ class LLM:
         Costruisce un payload compatibile con l'interfaccia OpenAI chat/completions,
         includendo temperature, top_p e repetition_penalty. Se l'endpoint rifiuta
         i parametri estesi (errore 400/422), esegue un fallback alla versione minimale.
+        Su errore 429 (rate limit), riprova con backoff esponenziale.
 
         Args:
             prompt: testo del prompt utente.
@@ -207,46 +223,58 @@ class LLM:
             ],
         }
 
-        try:
-            # Invio della richiesta POST all'endpoint API
-            response = requests.post(
-                API_URL,
-                headers=self.headers,
-                json=payload,
-                timeout=self.timeout,
-            )
-            response.raise_for_status()
-            # Estrazione del contenuto della risposta dal formato OpenAI
-            result = response.json()
-            return result["choices"][0]["message"]["content"]
+        # Rispetta il rate limit prima di ogni chiamata
+        self._wait_rate_limit()
 
-        except requests.exceptions.Timeout:
-            # Gestione timeout: la richiesta ha superato il tempo limite
-            print("[Warning] Timeout sulla richiesta Velvet API.")
-            return ""
+        for attempt in range(MAX_RETRIES_429 + 1):
+            try:
+                # Invio della richiesta POST all'endpoint API
+                response = requests.post(
+                    API_URL,
+                    headers=self.headers,
+                    json=payload,
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                # Estrazione del contenuto della risposta dal formato OpenAI
+                result = response.json()
+                return result["choices"][0]["message"]["content"]
 
-        except requests.exceptions.HTTPError as e:
-            # Gestione errori HTTP: log dello status code e del corpo della risposta
-            status = e.response.status_code if e.response is not None else "unknown"
-            body = e.response.text if e.response is not None else ""
-            print(f"[Warning] Errore HTTP {status}: {body}")
+            except requests.exceptions.Timeout:
+                # Gestione timeout: la richiesta ha superato il tempo limite
+                print("[Warning] Timeout sulla richiesta Velvet API.")
+                return ""
 
-            # Fallback per endpoint che non accettano repetition_penalty/top_p:
-            # riprova con payload minimale (solo temperature e max_tokens)
-            if status in (400, 422):
-                return self._call_api_minimal(prompt, max_new_tokens)
+            except requests.exceptions.HTTPError as e:
+                status = e.response.status_code if e.response is not None else "unknown"
+                body = e.response.text if e.response is not None else ""
 
-            return ""
+                # Retry con backoff esponenziale su 429 (rate limit)
+                if status == 429 and attempt < MAX_RETRIES_429:
+                    delay = RETRY_BASE_DELAY * (2 ** attempt)
+                    print(f"[Rate limit] 429 — retry {attempt + 1}/{MAX_RETRIES_429} tra {delay:.0f}s")
+                    time.sleep(delay)
+                    self._last_request_time = time.time()
+                    continue
 
-        except (KeyError, IndexError, TypeError) as e:
-            # Gestione formato risposta inatteso (JSON malformato o struttura diversa)
-            print(f"[Warning] Formato risposta inatteso: {e}")
-            return ""
+                print(f"[Warning] Errore HTTP {status}: {body}")
 
-        except requests.exceptions.RequestException as e:
-            # Gestione errori di rete generici (connessione rifiutata, DNS, ecc.)
-            print(f"[Warning] Errore di rete: {e}")
-            return ""
+                # Fallback per endpoint che non accettano repetition_penalty/top_p
+                if status in (400, 422):
+                    return self._call_api_minimal(prompt, max_new_tokens)
+
+                return ""
+
+            except (KeyError, IndexError, TypeError) as e:
+                print(f"[Warning] Formato risposta inatteso: {e}")
+                return ""
+
+            except requests.exceptions.RequestException as e:
+                print(f"[Warning] Errore di rete: {e}")
+                return ""
+
+        print("[Warning] Rate limit: tentativi esauriti.")
+        return ""
 
     def _call_api_minimal(self, prompt: str, max_new_tokens: int) -> str:
         """
