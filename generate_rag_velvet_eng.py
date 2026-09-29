@@ -1,5 +1,5 @@
 """
-generate_rag_velvet_eng_unified.py
+generate_rag_velvet_eng.py
 
 Generazione risposte RAG per dataset inglesi con modelli Velvet.
 
@@ -23,7 +23,7 @@ Dipendenze principali:
     - src/llm_velvet.LLM : wrapper API per i modelli Velvet
 
 Uso:
-    python generate_rag_velvet_eng_unified.py \\
+    python generate_rag_velvet_eng.py \\
         --llm_id velvet-14b \\
         --datasets triviaqa nq bioasq \\
         --k_values 5 \\

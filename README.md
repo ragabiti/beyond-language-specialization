@@ -36,7 +36,7 @@ linked to their original distributions.
 ├── generate_rag_eng.py                    generation — English (local)
 ├── generate_rag_pharmaqa.py               generation — PharmaQA (local)
 ├── generate_rag_uniqa_vllm.py             generation — UniQA (local + Velvet dispatch)
-├── generate_rag_velvet_eng_unified.py     generation — English (Velvet)
+├── generate_rag_velvet_eng.py     generation — English (Velvet)
 ├── generate_rag_velvet_pharmaqa.py        generation — PharmaQA (Velvet)
 │
 ├── prepare_ragass_data_eng.py             build frozen eval samples — English
@@ -265,7 +265,7 @@ python generate_rag_pharmaqa.py --llm_id ibm-granite/granite-4.1-8b
 python generate_rag_uniqa_vllm.py --llm_id google/gemma-4-E2B-it
 
 # Velvet (API) — English and PharmaQA use dedicated scripts; UniQA reuses the script above
-python generate_rag_velvet_eng_unified.py --llm_id velvet-14b --datasets triviaqa nq bioasq --k_values 5
+python generate_rag_velvet_eng.py --llm_id velvet-14b --datasets triviaqa nq bioasq --k_values 5
 python generate_rag_velvet_pharmaqa.py --llm_id velvet-14b
 python generate_rag_uniqa_vllm.py --llm_id velvet-14b       # Velvet on UniQA
 ```

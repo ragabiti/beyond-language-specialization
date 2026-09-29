@@ -203,9 +203,9 @@ def run_dataset(llm, dataset_name: str, dataset_path: str, args, llm_folder: str
         # Iterazione su ogni esempio del dataset
         for idx, example in enumerate(tqdm(data, desc=f"{dataset_name} k={k}")):
             # Selezione dei top-k passaggi recuperati per questo esempio
-            passages = example['passages'][:k]
+            passages = example.get('passages', [])[:k]
             # Costruzione del prompt con istruzione farmaceutica, documenti e domanda
-            prompt   = build_prompt(example['question'], passages)
+            prompt   = build_prompt(example.get('question', ''), passages)
 
             # Chiamata al modello Velvet per generare la risposta
             output = llm.generate(prompt, max_new_tokens=args.max_new_tokens)
@@ -217,15 +217,15 @@ def run_dataset(llm, dataset_name: str, dataset_path: str, args, llm_folder: str
             generated = clean_generated(output)
 
             # Valutazione della correttezza tramite string match
-            is_correct = string_match(generated, example['answers'])
+            is_correct = string_match(generated, example.get('answers', []))
             if is_correct:
                 correct += 1
 
             # Accumulo dei risultati per l'esempio corrente
             results.append({
-                'example_id':  example['example_id'],
-                'question':    example['question'],
-                'answers':     example['answers'],
+                'example_id':  example.get('example_id', idx),
+                'question':    example.get('question', ''),
+                'answers':     example.get('answers', []),
                 'generated':   generated,
                 'is_correct':  is_correct,
                 'k':           k,
