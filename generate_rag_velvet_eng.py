@@ -399,6 +399,8 @@ def run_dataset(llm, dataset_name: str, dataset_path: str, args, llm_folder: str
             if isinstance(output, list):
                 output = output[0]
 
+            # Salvataggio output grezzo prima della pulizia (per eventuale ri-cleaning offline)
+            raw_output = output if isinstance(output, str) else str(output)
             # Pulizia robusta dell'output grezzo del modello
             generated = clean_generated(output)
 
@@ -412,6 +414,7 @@ def run_dataset(llm, dataset_name: str, dataset_path: str, args, llm_folder: str
                 "example_id": eid,
                 "question": example.get("question", ""),
                 "answers": example.get("answers", []),
+                "raw_output": raw_output,
                 "generated": generated,
                 "is_correct": is_correct,
                 "k": k,
